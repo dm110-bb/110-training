@@ -20,6 +20,13 @@ public class ProductRepository : IProductRepository
     public async Task<IReadOnlyList<Product>> GetActiveAsync() =>
         await _db.Products.Where(p => p.IsActive).OrderBy(p => p.Sku).ToListAsync();
 
+    public async Task<IReadOnlyList<Product>> GetActiveBelowStockAsync(int threshold) =>
+        await _db.Products
+            .Where(p => p.IsActive && p.StockQuantity < threshold)
+            .OrderBy(p => p.StockQuantity)
+            .ThenBy(p => p.Sku)
+            .ToListAsync();
+
     public Task<Product?> GetByIdAsync(int id) =>
         _db.Products.FirstOrDefaultAsync(p => p.Id == id);
 

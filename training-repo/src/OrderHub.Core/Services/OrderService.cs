@@ -35,25 +35,52 @@ public class OrderService : IOrderService
     public async Task<ServiceResult<Order>> CreateOrderAsync(int customerId, IReadOnlyList<NewOrderLine> lines)
     {
         var customer = await _customerRepository.GetByIdAsync(customerId);
-        if (customer is null)
-            return ServiceResult<Order>.Fail("找不到指定的客戶");
 
-        if (lines is null || lines.Count == 0)
-            return ServiceResult<Order>.Fail("訂單至少需要一項商品");
+        var requestError = ValidateOrderRequest(customer, lines);
+        if (requestError is not null)
+            return ServiceResult<Order>.Fail(requestError);
 
-        if (lines.Any(l => l.Quantity <= 0))
-            return ServiceResult<Order>.Fail("商品數量必須大於 0");
-
-        if (lines.Select(l => l.ProductId).Distinct().Count() != lines.Count)
-            return ServiceResult<Order>.Fail("同一商品請勿重複加入，請調整數量即可");
-
-        var errors = new List<string>();
         var order = new Order
         {
-            CustomerId = customer.Id,
+            CustomerId = customer!.Id,
             Status = OrderStatus.Pending,
             CreatedAt = DateTime.UtcNow
         };
+
+        var itemErrors = await AddValidatedOrderItemsAsync(order, lines);
+        if (itemErrors.Count > 0)
+            return ServiceResult<Order>.Fail(itemErrors);
+
+        await _orderRepository.AddAsync(order);
+        await _orderRepository.SaveChangesAsync();
+
+        return ServiceResult<Order>.Ok(order);
+    }
+
+    private static string? ValidateOrderRequest(
+        Customer? customer,
+        IReadOnlyList<NewOrderLine> lines)
+    {
+        if (customer is null)
+            return "找不到指定的客戶";
+
+        if (lines is null || lines.Count == 0)
+            return "訂單至少需要一項商品";
+
+        if (lines.Any(line => line.Quantity <= 0))
+            return "商品數量必須大於 0";
+
+        if (lines.Select(line => line.ProductId).Distinct().Count() != lines.Count)
+            return "同一商品請勿重複加入，請調整數量即可";
+
+        return null;
+    }
+
+    private async Task<IReadOnlyList<string>> AddValidatedOrderItemsAsync(
+        Order order,
+        IReadOnlyList<NewOrderLine> lines)
+    {
+        var errors = new List<string>();
 
         foreach (var line in lines)
         {
@@ -80,13 +107,7 @@ public class OrderService : IOrderService
             });
         }
 
-        if (errors.Count > 0)
-            return ServiceResult<Order>.Fail(errors);
-
-        await _orderRepository.AddAsync(order);
-        await _orderRepository.SaveChangesAsync();
-
-        return ServiceResult<Order>.Ok(order);
+        return errors;
     }
 
     public async Task<ServiceResult<Order>> CancelOrderAsync(int id)

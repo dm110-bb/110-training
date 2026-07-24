@@ -21,7 +21,7 @@
 
    ```powershell
    git add .
-   git commit -m "你的 commit 訊息"
+   git commit -m "你的 commit 訊息，沒訊息"
    ```
 
 4. 推上你的 fork：

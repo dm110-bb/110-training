@@ -5,70 +5,191 @@
 
 #### 使用的 agent 與模型：
 
+* Codex（GPT-5）
+
 ---
 
 ## 通用四問
 
 ### 1. 我的任務拆解
 
-（開工前你把任務拆成哪幾步？實際做的時候順序有變嗎？為什麼變？）
+我一開始先要求 agent：
 
--
+> `read thru all the .md, and go thru the project and show me the place that can be enhanced`
+
+之後我把工作改成「一次只做一件、每件先讓我 review，再 commit / push」：
+
+> `all you listed, but one by one. btw did you go thru the activity-guideline.md traning 1-4 ?`
+
+實際執行順序如下：
+
+1. 先讀 repository 內的 Markdown、`activity-guideline.md` 與現有程式，建立 Web / Core / Infrastructure 的分層理解。
+2. 練習 1：加入 Codex 專案設定、規則、hooks、agent 與 `fix-bug` skill。
+3. 練習 2：三個 bug 各自走「先寫會失敗的回歸測試 → 修正 → focused test → full test → review → 獨立 commit」。
+4. 練習 3：先看計畫，再實作低庫存頁；我對 `LowStockProduct` 的位置與整體結構有疑問，所以沒有直接接受第一次版本，而是多次 review，重新檢查 repository ownership、dependency direction 與命名後才採用最後的調整。
+5. 練習 4：先看重構計畫，再比較不同 helper 設計的責任與耦合程度，最後只改 `OrderService.cs`。
+6. 每個階段都由我明確說 `approve` 後才 commit / push，commit body 固定加入 Summary、Behavior 或 Verification。
+
+原本預期一路照初版計畫做完，但練習 3 的順序有改。第一次低庫存查詢在 EF Core InMemory 測試是綠的，實際用 SQL Server 跑 `/Products/LowStock` 時卻出現：
+
+```text
+System.InvalidOperationException: The LINQ expression ... could not be translated.
+```
+
+所以工作多了「實際 SQL route smoke test → 修正 query translation → 再測一次」。
+
+最後採用較清楚的責任分工：`ProductRepository` 查符合門檻的商品、`OrderRepository` 統計這些商品近 30 天的銷量、`ProductService` 合併成 `LowStockProductSummary`。
 
 ### 2. AI 幫上大忙的地方
 
-（哪件事 agent 做得又快又好？**貼上當時的提問原文**，說明為什麼這樣問有效。）
-
--
+最有幫助的是把跨層功能拆開檢查，並且真的跑到 SQL Server，而不是只停在 InMemory test。
 
 ### 3. AI 誤導我的地方，與我如何發現
 
-（agent 說錯／改錯／過度自信的時刻。你靠什麼抓到——對照程式碼？頁面實測？跑測試？）
+練習 3 的第一版是最明顯的例子。
 
--
+一開始 agent 把 `LowStockProduct` 放在 `OrderHub.Core.Services`，而且讓 `ProductRepository` 直接查 `OrderItems`。雖然程式可以解釋成「低庫存報表以 Product 為主」，但我看 diff 時仍覺得結構不自然，所以我直接問：
+
+> `why we have record LowStockProduct, inside our OrderHub.Core.Services ? why it was different then others ?`
+
+過程中 agent 曾建議移到 `Core.Models`，我又發現專案現有的 `NewOrderLine` record 就放在 Services，因此把它移回來。這也讓我知道「檔案放得像現有範例」仍不代表責任已經切好；真正的問題是 repository contract 不應為了這個 report 互相混用資料責任。
+
+最後我要求重新檢查 dependency direction、repository ownership、查詢範圍與命名，才收斂成現在的結構：
+
+```text
+ProductsController
+  → ProductService
+      → ProductRepository：篩選低庫存商品
+      → OrderRepository：依 product IDs 統計銷量
+  → LowStockProductSummary
+```
+
+另一個誤判是 InMemory tests 全綠後，agent 一度認為 EF query 沒問題。實際跑 SQL Server route 才抓到 `could not be translated`。原因是 EF SQL provider 無法翻譯 projection 後的排序方式；InMemory provider 沒有暴露這個問題。這次是靠真實 provider 的 smoke test 抓到，不是靠單元測試。
+
+HTTP 驗證也出現過一次誤報。腳本直接比對中文字串時得到 `INVALID_VALIDATION=False`，但檢查 raw HTML 後看到：
+
+```html
+<span class="text-danger field-validation-error" ...>
+    &#x5EAB;&#x5B58;&#x9580;&#x6ABB;...
+</span>
+```
+
+Razor 把中文編成 HTML numeric entities，功能其實正常。後來驗證方式改成檢查 `field-validation-error`、HTTP status 與表格是否隱藏。
 
 ### 4. 我會帶回日常工作的一招
 
-（一個具體、可複製的做法，不要寫「要多驗證」這種口號——寫出**操作步驟**。）
+我會固定使用以下流程處理 agent 產出的變更：
 
--
+1. 先請 agent 只讀規格與現有程式，列出要改的檔案、每層責任與測試邊界。
+2. 我先 review 計畫，特別檢查是否多做了不在需求內的重構。
+3. Bug 先建立一個會失敗的 regression test，記錄修正前的實際值。
+4. 實作後依序跑 focused tests、full tests、Release build、format check。
+5. 有 EF query、routing、binding 或 validation 時，再用真實 SQL provider / HTTP route 做 smoke test，不能只相信 InMemory。
+6. 看完整 diff，對命名或責任有疑問就先停下來問；必要時列出不同結構方案，比較 dependency direction、資料責任、耦合程度與未來擴充成本，再採用適合目前專案的做法。
+7. 我明確 approve 後才 commit / push；commit 使用固定格式：
+
+```text
+<type>(<scope>): <summary>
+
+Summary:
+- ...
+
+Behavior:
+- ...
+
+Verification:
+- ...
+```
+
+這套流程的重點不是「多跑一次測試」，而是每種風險用對應的驗證方式：商業規則用 regression test、EF translation 用 SQL Server、MVC validation 用 HTTP response、架構問題用 diff 與責任比較。
 
 ## 自我驗證（做到哪個階段答哪題）
 
 ### 第一階段 — Agentic Coding
 
-練習 1
+#### 練習 1
 
-1. 我能不看筆記說出三個專案（Web/Core/Infrastructure）各自的職責
-2. 我核對過 agent 描述的建單流程，且**至少找出一處不精確或過度簡化的說法**
-3. 我知道商業邏輯應該放在哪一層、新增頁面要動哪些地方
+* [x] 我能不看筆記說出三個專案的職責：
 
-練習 2
+  * `OrderHub.Web`：Controller、ViewModel、Razor View 與 UI mapping。
+  * `OrderHub.Core`：domain、service、商業規則與 repository interface。
+  * `OrderHub.Infrastructure`：EF Core DbContext、repository implementation、migration 與 seed data。
+* [x] 我核對過建單流程，也找到一個容易被過度簡化的地方：建單不是「全部商品先驗證完才扣庫存」。目前程式會逐項查商品，通過就先扣 tracked entity 的庫存並建立 item；如果後面的商品失敗，訂單不會 `SaveChanges`，但同一個 DbContext 內前面商品的 tracked stock 已經被修改。
+* [x] 我知道商業邏輯應放在 Core service；新增 MVC 頁面通常會動 Controller、Service、Repository、ViewModel、View 與 Tests，必要時再調整導覽列與 DI。
+* [x] Codex 專案設定已獨立 commit：`9bceca4 chore: configure Codex project workflow`。
 
-1. 三個 bug 我都先在頁面上重現過，才開始找程式
-2. 我給 agent 的資訊包含具體觀察（頁碼／金額數字／庫存數字），而不是只貼客訴原文
-3. 每個修復都回到頁面驗證過症狀消失
-4. 每個 bug 都補了一個回歸測試，`dotnet test` 全綠
-5. 三個獨立 commit，message 說明症狀與根因
-6. （思考題）為什麼原本的測試沒抓到這三個 bug？
+#### 練習 2
 
-練習 3
+* [~] 我沒有把三個 bug 都先親自在瀏覽器逐項重現；本次主要由 failing regression tests 重現。下次應先記錄頁面上的 page、金額與庫存數字，再交給 agent。
+* [x] 我有使用具體數字驗證根因：
 
-1. `/Products/LowStock` 不帶參數 → 門檻 10 的結果；帶 `?threshold=3` → 結果隨之改變
-2. `?threshold=0`、`?threshold=-1` → 頁面顯示驗證錯誤，不是 500
-3. 售出數量欄位排除了 Cancelled 訂單（可用一筆已取消的訂單驗證）
-4. 停售（已停售 badge）商品不出現在列表
-5. 程式分層與命名跟既有的 Products 功能一致（請 agent 自我 review 一次，並自己確認）
-6. 至少 3 個新測試，`dotnet test` 全綠
+  * pagination page 1 不應跳過第一頁資料；
+  * Gold `1000` 應為 `900`，不可變成 `810`；
+  * stock `10 → 7 → cancel` 應回到 `10`，修正前是 `7`。
+* [~] 三個症狀都有 regression test 與 full test 證明修正，但沒有留下三次瀏覽器人工驗證的完整紀錄。
+* [x] 每個 bug 都新增回歸測試，最終 full suite 全綠。
+* [x] 三個 bug 是三個獨立 commit：
 
-練習 4
+  * `edc8052 fix: correct one-based order pagination`
+  * `53c6e45 fix: apply Gold discount once`
+  * `4162418 fix: restore stock when cancelling orders`
+* [x] 原本測試沒有抓到的原因：
 
-1. 重構後 `dotnet test` 全綠
-2. 我能說出這次重構「改善了什麼、沒有改變什麼」
-3. 我有在 code review 的角度看過 diff（不是 agent 說好就好）
+  * 分頁測試沒有驗證 page 1 / page 2 的實際 offset。
+  * 折扣測試只驗證計算公式，沒有把建單時的 price snapshot 與 Gold 總額串起來驗證。
+  * 取消訂單測試只驗證 status，沒有驗證庫存是否補回。
+
+#### 練習 3
+
+* [~] `/Products/LowStock` 不帶參數已驗證 default threshold 為 `10`；`threshold=1` 已驗證 empty state。沒有另外留下 `threshold=3` 的 HTTP 紀錄，但 service test 已驗證 threshold 是嚴格 `<`，且不同門檻會改變結果。
+* [~] `threshold=0` 已實際驗證為 HTTP `200`、顯示 validation error、隱藏 table；`-1` 沒有留下獨立 HTTP 紀錄，但使用同一個 `[Range(1, ...)]` 規則。
+* [x] 近 30 天銷量測試包含：
+
+  * recent + non-cancelled：計入；
+  * recent + Cancelled：排除；
+  * 超過 30 天：排除；
+  * 非低庫存商品：不影響結果。
+* [x] inactive 低庫存商品已由 service test 證明不會出現在結果。
+* [x] 我沒有直接接受第一次結構。我檢查 Controller / Service / Repository / ViewModel / View 的責任，並重新比較不同 repository 分工與資料流方案後再調整。
+* [x] 新增 4 個低庫存 service tests；full suite 從 `31` 增加到 `35`，全部通過。
+* [x] 真實 SQL Server route smoke test 抓到並修正 InMemory 無法發現的 EF translation 問題。
+* [x] 獨立 commit：`a31dcda feat(products): add low-stock inventory report`。
+
+#### 練習 4
+
+* [x] 重構後 OrderService tests `29/29`、full suite `35/35`。
+* [x] 改善的部分：
+
+  * `CreateOrderAsync` 只保留 orchestration。
+  * request-level validation 集中到 `ValidateOrderRequest`。
+  * product validation、stock mutation 與 item creation 集中到 `AddValidatedOrderItemsAsync`。
+* [x] 沒有改變的部分：
+
+  * validation order 與錯誤文字；
+  * 商品錯誤的 aggregation；
+  * 扣庫存與建立 snapshot 的時機；
+  * public API、dependencies 與 persistence behavior。
+* [x] 我有從 code review 角度看 diff，也先比較不同 helper 回傳型別的責任與耦合程度。最後讓 private item helper 只回傳 `IReadOnlyList<string>` errors，而不是回傳 `ServiceResult<Order>`，避免不必要的耦合。
+* [x] 獨立 commit：`e1435aa refactor(orders): extract order creation validation`。
 
 ---
 
 ## 附錄：值得留下的對話片段
 
-（貼 1–2 段最有代表性的 prompt 與回應**摘要**——不用貼全文，重點是「我怎麼問」和「它怎麼答」。）
+### 片段 1：我對架構有疑問時沒有直接 approve
+
+我的 prompt：
+
+> `why we have record LowStockProduct, inside our OrderHub.Core.Services ? why it was different then others ?`
+>
+> `i still feel weird about this full edit, help me verify and make the best choice of structure and future proof`
+
+回應摘要：agent 一開始只解釋 record 是 query DTO，之後依我的追問重新檢查 dependency direction、repository ownership 與命名。最後把它改名為 `LowStockProductSummary`，並拆開 Product / Order repository 的查詢責任。
+
+### 片段 2：比較不同方案，不直接接受第一版
+
+我的 prompt：
+
+> `help me verify and make the best choice of structure and future proof`
+
+回應摘要：agent 重新檢查 Training 3 與 Training 4 的實作方式，列出各方案的責任分工、耦合程度與查詢範圍。Training 3 最後採用 Product / Order repository 分工，並把銷量查詢限制在符合門檻的 product IDs；Training 4 使用兩個 private helper，但讓 item helper 只回傳 errors，避免不必要地耦合 `ServiceResult<Order>`。

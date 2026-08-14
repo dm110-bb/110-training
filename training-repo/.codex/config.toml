@@ -3,3 +3,7 @@ hooks = true
 
 [agents]
 max_concurrent_threads_per_session = 3
+
+[mcp_servers.playwright]
+command = "npm"
+args = ["exec", "--yes", "--package=node@20", "--package=@playwright/mcp@latest", "--", "playwright-mcp"]

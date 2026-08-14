@@ -193,3 +193,50 @@ Verification:
 > `help me verify and make the best choice of structure and future proof`
 
 回應摘要：agent 重新檢查 Training 3 與 Training 4 的實作方式，列出各方案的責任分工、耦合程度與查詢範圍。Training 3 最後採用 Product / Order repository 分工，並把銷量查詢限制在符合門檻的 product IDs；Training 4 使用兩個 private helper，但讓 item helper 只回傳 errors，避免不必要地耦合 `ServiceResult<Order>`。
+
+---
+
+## 第二階段 — 自建 MCP Server
+
+### 練習 0 — Playwright MCP
+
+專案的 `.codex/config.toml` 已註冊 Playwright MCP。這台機器的系統 Node 是 `18.18.2`，而最新版 Playwright MCP 要求 Node 20 以上；因為機器沒有 `winget`，設定改成由 npm 暫時提供 Node 20，不更動全機 Node 安裝：
+
+```toml
+[mcp_servers.playwright]
+command = "npm"
+args = ["exec", "--yes", "--package=node@20", "--package=@playwright/mcp@latest", "--", "playwright-mcp"]
+```
+
+實際執行同一個命令加上 `--help` 已成功啟動 Playwright MCP CLI。建立訂單與截圖仍需要先啟動 SQL Server 和網站，這項 UI 驗證尚未完成。
+
+### 練習 1 — 三個唯讀工具
+
+我新增 `OrderHub.Mcp` stdio server，沒有讓工具直接存取 `OrderHubDbContext`。資料流是：
+
+```text
+MCP client
+  → OrderHubTools
+      → IOrderService：訂單查詢與計價
+      → IProductRepository：低庫存商品查詢
+```
+
+`dotnet build src/OrderHub.Mcp/OrderHub.Mcp.csproj --no-restore -m:1` 成功，0 warnings / 0 errors。直接做 stdio discovery 時只列出 `get_order`、`low_stock`、`customer_orders`，三個工具皆為 `readOnlyHint: true`。
+
+### 練習 2 — MCP Inspector
+
+我使用官方 Inspector CLI，而不是只用自己寫的 JSON-RPC 腳本：
+
+```powershell
+npm exec --yes --package=node@20 --package=@modelcontextprotocol/inspector@latest -- `
+  mcp-inspector --cli dotnet src/OrderHub.Mcp/bin/Debug/net8.0/OrderHub.Mcp.dll `
+  --method tools/list
+```
+
+Inspector 實際列出三個工具、中文 description、參數 schema 與 read-only annotations：
+
+* `customer_orders(customerId: integer)`
+* `get_order(id: integer)`
+* `low_stock(threshold: integer = 10)`
+
+本機目前沒有可連線的 `OrderHubTraining` SQL Server，因此 `low_stock(threshold=10)` 與 `/Products` 頁面的資料比對，以及不存在訂單的實際 DB 呼叫尚未完成。server 的 tool discovery 本身不需要連線資料庫，已由 Inspector 驗證。

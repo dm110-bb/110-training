@@ -91,4 +91,14 @@ public class OrderHubTools(
         return JsonSerializer.Serialize(result, Json);
     }
 
+    [McpServerTool(Destructive = true, Idempotent = false),
+     Description("取消一筆訂單（僅限待處理/已確認狀態），品項庫存會自動回補。此操作會修改資料，無法還原")]
+    public async Task<string> CancelOrder(
+        [Description("要取消的訂單 Id")] int id)
+    {
+        var result = await orderService.CancelOrderAsync(id);
+        return result.Success
+            ? $"訂單 {id} 已取消，庫存已回補"
+            : $"取消失敗：{result.ErrorMessage}";
+    }
 }

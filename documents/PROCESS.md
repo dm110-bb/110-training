@@ -254,3 +254,14 @@ default_tools_approval_mode = "writes"
 ```
 
 沒有 MCP 時，這次 agent 為了回答 OrderHub 問題先搜尋 solution、閱讀 repository/service，再確認 connection string。接上 MCP 後，`low_stock(threshold=5)` 的介面已能由 server discovery 直接取得，不必重新理解資料存取程式。因本機 SQL Server 未啟動，實際的 before/after 商品清單仍待資料庫可用且重啟 Codex session 後完成。
+
+### 練習 4 — `cancel_order`
+
+`cancel_order` 只呼叫 `IOrderService.CancelOrderAsync`，沒有在 MCP 層重寫狀態判斷或庫存回補。Inspector discovery 顯示：
+
+```text
+destructiveHint: true
+idempotentHint: false
+```
+
+三個查詢工具仍維持 `readOnlyHint: true`。專案 Codex 設定使用 `default_tools_approval_mode = "writes"`，所以 `cancel_order` 應要求人工確認。現有 `OrderServiceCancelTests` 已驗證待處理訂單可取消、庫存會回補、已出貨與不存在的訂單會被拒絕；實際資料庫取消與 UI 庫存比對仍待 SQL Server 可用後執行。

@@ -265,3 +265,13 @@ idempotentHint: false
 ```
 
 三個查詢工具仍維持 `readOnlyHint: true`。專案 Codex 設定使用 `default_tools_approval_mode = "writes"`，所以 `cancel_order` 應要求人工確認。現有 `OrderServiceCancelTests` 已驗證待處理訂單可取消、庫存會回補、已出貨與不存在的訂單會被拒絕；實際資料庫取消與 UI 庫存比對仍待 SQL Server 可用後執行。
+
+### 練習 5 — Resource 與 Prompt
+
+Inspector 能讀到 `orderhub://discount-rules`，內容包含 Standard、Silver 與 Gold 的折扣，以及「折扣只套用一次」的說明。`low_stock_report` prompt 帶入 `threshold=5` 後，展開訊息包含 `low_stock（threshold=5）` 和採購建議表的欄位。
+
+三種 MCP 原語的分工：
+
+* 折扣規則用 Resource：client 可按需要把穩定背景知識放進 context，不必讓 agent 搜尋 `OrderService.cs`，也不需要假裝這是一個動作。代價是規則現在同時存在 service 與 resource 字串；折扣改版時必須同步更新，否則會有兩份互相矛盾的真相。
+* 採購報告用 Prompt：團隊共用同一個有版本控制的提問方式，門檻可參數化；不需要每位使用者各自保存、複製一段 prompt。Prompt 負責替使用者表達任務，實際查資料仍由 tool 完成。
+* 查詢與取消用 Tool：它們需要參數、會執行程式或存取資料庫。尤其 `cancel_order` 不能只依賴 client 看 annotation 後跳確認；真正可取消的狀態與庫存回補仍由 `OrderService.CancelOrderAsync` 強制執行。

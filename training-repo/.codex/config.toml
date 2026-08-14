@@ -3,3 +3,13 @@ hooks = true
 
 [agents]
 max_concurrent_threads_per_session = 3
+
+[mcp_servers.playwright]
+command = "npm"
+args = ["exec", "--yes", "--package=node@20", "--package=@playwright/mcp@latest", "--", "playwright-mcp"]
+
+[mcp_servers.orderhub]
+command = "dotnet"
+args = ["run", "--no-build", "--project", "src/OrderHub.Mcp"]
+startup_timeout_sec = 30
+default_tools_approval_mode = "writes"

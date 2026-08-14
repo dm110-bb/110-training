@@ -193,3 +193,85 @@ Verification:
 > `help me verify and make the best choice of structure and future proof`
 
 回應摘要：agent 重新檢查 Training 3 與 Training 4 的實作方式，列出各方案的責任分工、耦合程度與查詢範圍。Training 3 最後採用 Product / Order repository 分工，並把銷量查詢限制在符合門檻的 product IDs；Training 4 使用兩個 private helper，但讓 item helper 只回傳 errors，避免不必要地耦合 `ServiceResult<Order>`。
+
+---
+
+## 第二階段 — 自建 MCP Server
+
+### 練習 0 — Playwright MCP
+
+專案的 `.codex/config.toml` 已註冊 Playwright MCP。這台機器的系統 Node 是 `18.18.2`，而最新版 Playwright MCP 要求 Node 20 以上；因為機器沒有 `winget`，設定改成由 npm 暫時提供 Node 20，不更動全機 Node 安裝：
+
+```toml
+[mcp_servers.playwright]
+command = "npm"
+args = ["exec", "--yes", "--package=node@20", "--package=@playwright/mcp@latest", "--", "playwright-mcp"]
+```
+
+實際執行同一個命令加上 `--help` 已成功啟動 Playwright MCP CLI。建立訂單與截圖仍需要先啟動 SQL Server 和網站，這項 UI 驗證尚未完成。
+
+### 練習 1 — 三個唯讀工具
+
+我新增 `OrderHub.Mcp` stdio server，沒有讓工具直接存取 `OrderHubDbContext`。資料流是：
+
+```text
+MCP client
+  → OrderHubTools
+      → IOrderService：訂單查詢與計價
+      → IProductRepository：低庫存商品查詢
+```
+
+`dotnet build src/OrderHub.Mcp/OrderHub.Mcp.csproj --no-restore -m:1` 成功，0 warnings / 0 errors。直接做 stdio discovery 時只列出 `get_order`、`low_stock`、`customer_orders`，三個工具皆為 `readOnlyHint: true`。
+
+### 練習 2 — MCP Inspector
+
+我使用官方 Inspector CLI，而不是只用自己寫的 JSON-RPC 腳本：
+
+```powershell
+npm exec --yes --package=node@20 --package=@modelcontextprotocol/inspector@latest -- `
+  mcp-inspector --cli dotnet src/OrderHub.Mcp/bin/Debug/net8.0/OrderHub.Mcp.dll `
+  --method tools/list
+```
+
+Inspector 實際列出三個工具、中文 description、參數 schema 與 read-only annotations：
+
+* `customer_orders(customerId: integer)`
+* `get_order(id: integer)`
+* `low_stock(threshold: integer = 10)`
+
+本機目前沒有可連線的 `OrderHubTraining` SQL Server，因此 `low_stock(threshold=10)` 與 `/Products` 頁面的資料比對，以及不存在訂單的實際 DB 呼叫尚未完成。server 的 tool discovery 本身不需要連線資料庫，已由 Inspector 驗證。
+
+### 練習 3 — 註冊給 Codex
+
+我把 OrderHub server 加到專案層級的 `.codex/config.toml`，並把預設 approval mode 設為 `writes`。因此唯讀工具可直接執行；之後加入的寫入工具則應要求確認：
+
+```toml
+[mcp_servers.orderhub]
+command = "dotnet"
+args = ["run", "--no-build", "--project", "src/OrderHub.Mcp"]
+startup_timeout_sec = 30
+default_tools_approval_mode = "writes"
+```
+
+沒有 MCP 時，這次 agent 為了回答 OrderHub 問題先搜尋 solution、閱讀 repository/service，再確認 connection string。接上 MCP 後，`low_stock(threshold=5)` 的介面已能由 server discovery 直接取得，不必重新理解資料存取程式。因本機 SQL Server 未啟動，實際的 before/after 商品清單仍待資料庫可用且重啟 Codex session 後完成。
+
+### 練習 4 — `cancel_order`
+
+`cancel_order` 只呼叫 `IOrderService.CancelOrderAsync`，沒有在 MCP 層重寫狀態判斷或庫存回補。Inspector discovery 顯示：
+
+```text
+destructiveHint: true
+idempotentHint: false
+```
+
+三個查詢工具仍維持 `readOnlyHint: true`。專案 Codex 設定使用 `default_tools_approval_mode = "writes"`，所以 `cancel_order` 應要求人工確認。現有 `OrderServiceCancelTests` 已驗證待處理訂單可取消、庫存會回補、已出貨與不存在的訂單會被拒絕；實際資料庫取消與 UI 庫存比對仍待 SQL Server 可用後執行。
+
+### 練習 5 — Resource 與 Prompt
+
+Inspector 能讀到 `orderhub://discount-rules`，內容包含 Standard、Silver 與 Gold 的折扣，以及「折扣只套用一次」的說明。`low_stock_report` prompt 帶入 `threshold=5` 後，展開訊息包含 `low_stock（threshold=5）` 和採購建議表的欄位。
+
+三種 MCP 原語的分工：
+
+* 折扣規則用 Resource：client 可按需要把穩定背景知識放進 context，不必讓 agent 搜尋 `OrderService.cs`，也不需要假裝這是一個動作。代價是規則現在同時存在 service 與 resource 字串；折扣改版時必須同步更新，否則會有兩份互相矛盾的真相。
+* 採購報告用 Prompt：團隊共用同一個有版本控制的提問方式，門檻可參數化；不需要每位使用者各自保存、複製一段 prompt。Prompt 負責替使用者表達任務，實際查資料仍由 tool 完成。
+* 查詢與取消用 Tool：它們需要參數、會執行程式或存取資料庫。尤其 `cancel_order` 不能只依賴 client 看 annotation 後跳確認；真正可取消的狀態與庫存回補仍由 `OrderService.CancelOrderAsync` 強制執行。

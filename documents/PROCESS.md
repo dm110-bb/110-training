@@ -240,3 +240,17 @@ Inspector 實際列出三個工具、中文 description、參數 schema 與 read
 * `low_stock(threshold: integer = 10)`
 
 本機目前沒有可連線的 `OrderHubTraining` SQL Server，因此 `low_stock(threshold=10)` 與 `/Products` 頁面的資料比對，以及不存在訂單的實際 DB 呼叫尚未完成。server 的 tool discovery 本身不需要連線資料庫，已由 Inspector 驗證。
+
+### 練習 3 — 註冊給 Codex
+
+我把 OrderHub server 加到專案層級的 `.codex/config.toml`，並把預設 approval mode 設為 `writes`。因此唯讀工具可直接執行；之後加入的寫入工具則應要求確認：
+
+```toml
+[mcp_servers.orderhub]
+command = "dotnet"
+args = ["run", "--no-build", "--project", "src/OrderHub.Mcp"]
+startup_timeout_sec = 30
+default_tools_approval_mode = "writes"
+```
+
+沒有 MCP 時，這次 agent 為了回答 OrderHub 問題先搜尋 solution、閱讀 repository/service，再確認 connection string。接上 MCP 後，`low_stock(threshold=5)` 的介面已能由 server discovery 直接取得，不必重新理解資料存取程式。因本機 SQL Server 未啟動，實際的 before/after 商品清單仍待資料庫可用且重啟 Codex session 後完成。

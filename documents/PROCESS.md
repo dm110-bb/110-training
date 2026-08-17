@@ -187,7 +187,7 @@ Verification:
 * [x] `Gemini:ApiKey` 沒有寫入 tracked appsettings；只允許 user-secrets 或 `GEMINI_API_KEY`。Codex project permission profile 也拒絕讀取 `%APPDATA%\Microsoft\UserSecrets\**`。
 * [x] 依目前官方文件把範例 endpoint 更新為 `/v1beta/interactions`；模型仍依活動指定使用 stable `gemini-3.5-flash`。
 * [x] focused tests：Core / repository / translator / transport `12/12`，HTTP integration tests `4/4`；full suite 從 `35` 增加到 `53`，全部通過。
-* [~] 本機沒有設定 `GEMINI_API_KEY`，因此沒有送出真實 Gemini 請求；缺 key 的 client 與 HTTP `503` 路徑已由自動化測試驗證。
+* [x] 使用 process-scoped `GEMINI_API_KEY` 完成真實 Gemini smoke test，key 沒有寫入檔案：有效查詢回 HTTP `200` 與 3 筆訂單；刪除意圖回 HTTP `422` 與「無法理解的查詢」；MVC 頁面回 HTTP `200` 且沒有 warning。測試後 server 已停止；缺 key 的 client 與 HTTP `503` 路徑另由自動化測試驗證。
 
 HTTP integration test 抓到一個只靠單元測試看不到的問題：第一版把 `[Required]` 掛在 record property，ASP.NET Core runtime 直接回 `500`，錯誤為：
 

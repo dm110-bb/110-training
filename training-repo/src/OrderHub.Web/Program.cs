@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using OrderHub.Core.Ai;
 using OrderHub.Core.Interfaces;
 using OrderHub.Core.Services;
 using OrderHub.Infrastructure.Data;
+using OrderHub.Infrastructure.Gemini;
 using OrderHub.Infrastructure.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,12 +20,20 @@ builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<ICustomerService, CustomerService>();
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IOrderSearchService, OrderSearchService>();
+
+builder.Services.Configure<GeminiOptions>(
+    builder.Configuration.GetSection(GeminiOptions.SectionName));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddHttpClient<IGeminiJsonClient, GeminiInteractionsClient>();
+builder.Services.AddScoped<IOrderQueryTranslator, GeminiOrderQueryTranslator>();
 
 var app = builder.Build();
 
 // 啟動時自動套用 migration 並植入種子資料，開發人員不需手動建庫。
-using (var scope = app.Services.CreateScope())
+if (!builder.Configuration.GetValue<bool>("SkipDatabaseInitialization"))
 {
+    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<OrderHubDbContext>();
     db.Database.Migrate();
     await DbSeeder.SeedAsync(db);
@@ -42,8 +52,12 @@ app.UseRouting();
 
 app.UseAuthorization();
 
+app.MapControllers();
+
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
 
 app.Run();
+
+public partial class Program;

@@ -1,3 +1,11 @@
+default_permissions = "orderhub"
+
+[permissions.orderhub]
+extends = ":workspace"
+
+[permissions.orderhub.filesystem]
+'C:\Users\*\AppData\Roaming\Microsoft\UserSecrets\**' = "deny"
+
 [features]
 hooks = true
 

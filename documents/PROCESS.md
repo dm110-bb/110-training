@@ -174,6 +174,41 @@ Verification:
 
 ---
 
+## 第三階段 — Gemini API
+
+### 練習 1：自然語言查訂單 API
+
+* [x] 新增 `POST /api/orders/search`，API 只接受自然語言並回傳訂單摘要。
+* [x] Gemini structured output 只會映射到 `OrderStatus`、`CustomerTier`、日期區間四種白名單條件；EF Core repository 才負責產生查詢，模型不會產生或執行 SQL。
+* [x] service 會拒絕空白、unsupported、沒有有效 filter、以及起訖日顛倒的查詢。
+* [x] repository 使用含當日的日期邊界、由新到舊排序，且最多回傳 100 筆。
+* [x] API 將無法理解的查詢轉成 `422`，將 Gemini 未設定或上游不可用轉成 `503`。
+* [x] transport 只重試 `408`、`429`、`5xx` 與網路錯誤；採 bounded exponential backoff + jitter，並尊重 `Retry-After` / `retryDelay`。
+* [x] `Gemini:ApiKey` 沒有寫入 tracked appsettings；只允許 user-secrets 或 `GEMINI_API_KEY`。Codex project permission profile 也拒絕讀取 `%APPDATA%\Microsoft\UserSecrets\**`。
+* [x] 依目前官方文件把範例 endpoint 更新為 `/v1beta/interactions`；模型仍依活動指定使用 stable `gemini-3.5-flash`。
+* [x] focused tests：Core / repository / translator / transport `12/12`，HTTP integration tests `4/4`；full suite 從 `35` 增加到 `53`，全部通過。
+* [x] 使用 process-scoped `GEMINI_API_KEY` 完成真實 Gemini smoke test，key 沒有寫入檔案：有效查詢回 HTTP `200` 與 3 筆訂單；刪除意圖回 HTTP `422` 與「無法理解的查詢」；MVC 頁面回 HTTP `200` 且沒有 warning。測試後 server 已停止；缺 key 的 client 與 HTTP `503` 路徑另由自動化測試驗證。
+
+HTTP integration test 抓到一個只靠單元測試看不到的問題：第一版把 `[Required]` 掛在 record property，ASP.NET Core runtime 直接回 `500`，錯誤為：
+
+```text
+Record type 'OrderSearchRequest' has validation metadata defined on property 'Text' that will be ignored.
+```
+
+修正成 constructor parameter metadata 後，缺少 `text` 會由 `[ApiController]` 正確回 `400`。
+
+### 練習 2：同一個 service 接上網站頁面
+
+* [x] 新增 `GET /Orders/Search?q=...`、專用 ViewModel、Razor View 與導覽列入口。
+* [x] Controller 只呼叫練習 1 的 `IOrderSearchService`；Core service 與 Gemini transport 都沒有為頁面修改。
+* [x] 查詢成功時，頁面結果和 API 使用相同 repository filter；integration test 驗證只顯示符合的金卡取消訂單。
+* [x] 刪除意圖會顯示「無法理解的查詢」warning；AI unavailable 也顯示清楚訊息，兩者都是 HTTP `200` 頁面而非 error page。
+* [x] MVC focused tests `3/3`；加入頁面後 full suite `56/56`，Release build 0 warning / 0 error。
+
+MVC 測試第一次直接比對中文字串時失敗，但 response 已正確走 warning / table branch。原因是 Razor response 內的中文使用 HTML entities；測試改成先 `WebUtility.HtmlDecode` 再驗證文字，避免把編碼形式誤判成功能錯誤。
+
+---
+
 ## 附錄：值得留下的對話片段
 
 ### 片段 1：我對架構有疑問時沒有直接 approve

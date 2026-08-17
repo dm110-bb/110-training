@@ -197,6 +197,16 @@ Record type 'OrderSearchRequest' has validation metadata defined on property 'Te
 
 修正成 constructor parameter metadata 後，缺少 `text` 會由 `[ApiController]` 正確回 `400`。
 
+### 練習 2：同一個 service 接上網站頁面
+
+* [x] 新增 `GET /Orders/Search?q=...`、專用 ViewModel、Razor View 與導覽列入口。
+* [x] Controller 只呼叫練習 1 的 `IOrderSearchService`；Core service 與 Gemini transport 都沒有為頁面修改。
+* [x] 查詢成功時，頁面結果和 API 使用相同 repository filter；integration test 驗證只顯示符合的金卡取消訂單。
+* [x] 刪除意圖會顯示「無法理解的查詢」warning；AI unavailable 也顯示清楚訊息，兩者都是 HTTP `200` 頁面而非 error page。
+* [x] MVC focused tests `3/3`；加入頁面後 full suite `56/56`，Release build 0 warning / 0 error。
+
+MVC 測試第一次直接比對中文字串時失敗，但 response 已正確走 warning / table branch。原因是 Razor response 內的中文使用 HTML entities；測試改成先 `WebUtility.HtmlDecode` 再驗證文字，避免把編碼形式誤判成功能錯誤。
+
 ---
 
 ## 附錄：值得留下的對話片段

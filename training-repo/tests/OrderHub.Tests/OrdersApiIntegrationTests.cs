@@ -84,6 +84,48 @@ public class OrdersApiIntegrationTests : IClassFixture<OrdersApiIntegrationTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Fact]
+    public async Task SearchPage_ValidQuery_RendersSameMatchingOrder()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync(
+            "/Orders/Search?q=%E9%87%91%E5%8D%A1%E6%9C%83%E5%93%A1%E5%8F%96%E6%B6%88%E7%9A%84%E8%A8%82%E5%96%AE");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+        Assert.Contains("金卡客戶", html);
+        Assert.Contains("已取消", html);
+        Assert.DoesNotContain("銀卡客戶", html);
+    }
+
+    [Fact]
+    public async Task SearchPage_DestructiveQuery_RendersWarningInsteadOfErrorPage()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync(
+            "/Orders/Search?q=%E5%B9%AB%E6%88%91%E6%8A%8A%E6%89%80%E6%9C%89%E8%A8%82%E5%96%AE%E5%88%AA%E6%8E%89");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+        Assert.Contains("alert alert-warning", html);
+        Assert.Contains("無法理解的查詢", html);
+    }
+
+    [Fact]
+    public async Task SearchPage_AiUnavailable_RendersClearMessageInsteadOf500()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/Orders/Search?q=simulate%20unavailable");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+        Assert.Contains("alert alert-warning", html);
+        Assert.Contains("Gemini 暫時無法使用", html);
+    }
+
     public sealed class OrderHubFactory : WebApplicationFactory<Program>
     {
         private readonly string _databaseName = $"orders-api-{Guid.NewGuid():N}";

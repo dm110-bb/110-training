@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
+using OrderHub.Core.Ai;
 using OrderHub.Core.Domain;
 using OrderHub.Core.Services;
 using OrderHub.Web.Helpers;
@@ -14,15 +15,18 @@ public class OrdersController : Controller
     private readonly IOrderService _orderService;
     private readonly ICustomerService _customerService;
     private readonly IProductService _productService;
+    private readonly IOrderSearchService _orderSearchService;
 
     public OrdersController(
         IOrderService orderService,
         ICustomerService customerService,
-        IProductService productService)
+        IProductService productService,
+        IOrderSearchService orderSearchService)
     {
         _orderService = orderService;
         _customerService = customerService;
         _productService = productService;
+        _orderSearchService = orderSearchService;
     }
 
     public async Task<IActionResult> Index(int page = 1, OrderStatus? status = null)
@@ -57,6 +61,41 @@ public class OrdersController : Controller
             return NotFound();
 
         return View(MapToDetails(order));
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> Search(string? q, CancellationToken cancellationToken)
+    {
+        var viewModel = new OrderSearchViewModel { Query = q ?? string.Empty };
+        if (string.IsNullOrWhiteSpace(q))
+            return View(viewModel);
+
+        try
+        {
+            var result = await _orderSearchService.SearchAsync(q, cancellationToken);
+            if (!result.Success)
+            {
+                viewModel.ErrorMessage = result.ErrorMessage;
+            }
+            else
+            {
+                viewModel.Orders = result.Value!.Select(order => new OrderRowViewModel
+                {
+                    Id = order.Id,
+                    CustomerName = order.Customer?.Name ?? "-",
+                    Status = order.Status,
+                    Total = _orderService.CalculateTotal(order),
+                    ItemCount = order.Items.Count,
+                    CreatedAt = order.CreatedAt
+                }).ToList();
+            }
+        }
+        catch (AiServiceUnavailableException ex)
+        {
+            viewModel.ErrorMessage = ex.Message;
+        }
+
+        return View(viewModel);
     }
 
     [HttpGet]

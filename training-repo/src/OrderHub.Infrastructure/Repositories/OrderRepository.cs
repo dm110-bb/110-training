@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using OrderHub.Core.Ai;
 using OrderHub.Core.Common;
 using OrderHub.Core.Domain;
 using OrderHub.Core.Interfaces;
@@ -56,6 +57,33 @@ public class OrderRepository : IOrderRepository
             .Where(o => o.CustomerId == customerId)
             .OrderByDescending(o => o.CreatedAt)
             .ToListAsync();
+
+    public async Task<IReadOnlyList<Order>> SearchAsync(
+        OrderSearchQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        var orders = _db.Orders
+            .Include(order => order.Customer)
+            .Include(order => order.Items)
+            .AsQueryable();
+
+        if (query.Status.HasValue)
+            orders = orders.Where(order => order.Status == query.Status.Value);
+        if (query.MemberTier.HasValue)
+            orders = orders.Where(order => order.Customer != null && order.Customer.Tier == query.MemberTier.Value);
+        if (query.DateFrom.HasValue)
+            orders = orders.Where(order => order.CreatedAt >= query.DateFrom.Value.Date);
+        if (query.DateTo.HasValue)
+        {
+            var endExclusive = query.DateTo.Value.Date.AddDays(1);
+            orders = orders.Where(order => order.CreatedAt < endExclusive);
+        }
+
+        return await orders
+            .OrderByDescending(order => order.CreatedAt)
+            .Take(100)
+            .ToListAsync(cancellationToken);
+    }
 
     public async Task<IReadOnlyDictionary<int, int>> GetSoldQuantitiesSinceAsync(
         IReadOnlyCollection<int> productIds,
